@@ -9,3 +9,4 @@ cache/
 .pytest_cache/
 runs/old_prompt/
 runs/*/config.json.bak
+runs/
