@@ -47,11 +47,12 @@ def load_people(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     return pd.concat([pd.read_parquet(f) for f in files]).reset_index(drop=True)
 
 
-def select_people(df: pd.DataFrame, n: int | None, seed: int = 0) -> pd.DataFrame:
-    """Seeded shuffle then take the first n, so a 20-person run is a subset of a 100-person run."""
+def select_people(df: pd.DataFrame, n: int | None, seed: int = 0, offset: int = 0) -> pd.DataFrame:
+    """Seeded shuffle then take people [offset, offset+n): a 20-person run is a subset of a 100-person run,
+    and offset=100 gives a disjoint set (used as an untouched final test set)."""
     order = list(range(len(df)))
     random.Random(seed).shuffle(order)
-    return df.iloc[order[: n or len(df)]].reset_index(drop=True)
+    return df.iloc[order[offset: offset + (n or len(df))]].reset_index(drop=True)
 
 
 def _answers(js: str) -> dict[str, tuple[int, str, dict, int | None]]:

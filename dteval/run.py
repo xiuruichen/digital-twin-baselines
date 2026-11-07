@@ -11,12 +11,12 @@ from .models import Cache, Model, letter_probs
 
 def simulate(model: Model, out_dir: Path, n_people: int | None, persona_chars: int | None,
              shuffle_seed: int | None, pricing_k: int, matrix_rows: int | None,
-             seed: int = 0, cache_dir: Path = Path("cache")) -> Path:
+             seed: int = 0, offset: int = 0, cache_dir: Path = Path("cache")) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     cache = Cache(cache_dir / f"{model.name.replace('/', '_')}.jsonl")
-    people = data.select_people(data.load_people(), n_people, seed)
+    people = data.select_people(data.load_people(), n_people, seed, offset)
     config = dict(model=model.name, n_people=len(people), persona_chars=persona_chars,
-                  shuffle_seed=shuffle_seed, pricing_k=pricing_k, matrix_rows=matrix_rows, seed=seed)
+                  shuffle_seed=shuffle_seed, pricing_k=pricing_k, matrix_rows=matrix_rows, seed=seed, offset=offset)
     (out_dir / "config.json").write_text(json.dumps(config, indent=2))
     path = out_dir / "predictions.jsonl"
     t0 = time.time()
