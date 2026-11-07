@@ -1,0 +1,9 @@
+{
+  "model": "bonsai2-4b",
+  "n_people": 10,
+  "persona_chars": 4000,
+  "shuffle_seed": null,
+  "pricing_k": 4,
+  "matrix_rows": 4,
+  "seed": 0
+}

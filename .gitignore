@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+data/
+models/
+tools/
+cache/
+*.log
+.pytest_cache/
+runs/old_prompt/
+runs/*/config.json.bak

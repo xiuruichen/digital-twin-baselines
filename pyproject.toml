@@ -1,0 +1,13 @@
+[project]
+name = "dteval"
+version = "0.1.0"
+description = "Evaluation harness: how well do open LLMs simulate individuals, and does token-logprob confidence predict when they're wrong?"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["numpy", "pandas", "pyarrow", "requests", "matplotlib", "huggingface_hub"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools]
+packages = ["dteval"]
