@@ -83,7 +83,8 @@ def build_systems(df: pd.DataFrame, oof: dict, n_folds: int = 5) -> tuple[dict, 
         m = item == it
         Llc[m] = Ll[m] - np.log(np.clip(np.exp(Ll[m]).mean(0), 1e-4, 1))
     gold = df.gold.to_numpy()
-    group = np.where(df.item_id.str.contains("#"), "likert", np.where(df.n_options == 2, "binary", "multi"))
+    group = np.where(df.item_id.str.startswith("QID9_"), "pricing", np.where(df.item_id.str.contains("#"), "likert",
+                     np.where(df.n_options == 2, "binary", "multi")))
     fold = df.pid.map(lambda s: int(hashlib.sha256(s.encode()).hexdigest(), 16) % n_folds).to_numpy()
     systems = {"LLM (raw)": np.exp(Ll) * mask, "LLM (label-free calibrated)": _softmax(Llc, mask),
                "Crowd prior (other people, mode)": np.exp(Lc) * mask, "Persona-feature model (no LLM)": np.exp(Lm) * mask}
@@ -154,3 +155,46 @@ def evaluate_run(run: Path, out: Path, C: float = 0.0006) -> dict:
                                               "n_people": n_people, "weights": {k: v.tolist() for k, v in weights.items()}}, indent=1))
     print(verdict); print(md_table(head, rows)); print(notes)
     return {"hit": hit, "summary": summary}
+
+
+def evaluate_no_llm(n_people: int, offset: int, out: Path, C: float = 0.0006, pricing_k: int = 4,
+                    matrix_rows: int | None = 4) -> dict:
+    """Crowd prior vs persona-feature ensemble vs their cross-fit blend, on a slice of people, no LLM needed.
+
+    Cheap, so it can use hundreds of people and answer 'how much lift does persona information give over the
+    crowd?' with tight intervals. Use people the persona model was never tuned on (offset 0, n 200 = dev + test)."""
+    from .data import person_items, select_people
+    people = load_people()
+    oof = features.out_of_fold(people, C=C, pricing_k=pricing_k, matrix_rows=matrix_rows)
+    rows = []
+    for r in select_people(people, n_people, 0, offset).itertuples(index=False):
+        for it in person_items(r, pricing_k, matrix_rows, 0):
+            rows.append({"pid": str(r.pid), "item_id": it.item_id, "gold": it.gold, "n_options": len(it.options),
+                         "retest_correct": float(it.retest == it.gold) if it.retest is not None else np.nan})
+    df = pd.DataFrame(rows)
+    keys = list(zip(df.pid, df.item_id))
+    crowd, mlp = zip(*[oof[k] for k in keys])
+    Lc, mask = _pad_log(list(crowd))
+    Lm, _ = _pad_log(list(mlp))
+    gold = df.gold.to_numpy()
+    fold = df.pid.map(lambda s: int(hashlib.sha256(s.encode()).hexdigest(), 16) % 5).to_numpy()
+    group = np.where(df.item_id.str.startswith("QID9_"), "pricing", np.where(df.item_id.str.contains("#"), "likert",
+                     np.where(df.n_options == 2, "binary", "multi")))
+    blend, w = crossfit([Lc, Lm], mask, gold, fold, group)
+    systems = {"Crowd prior (other people, mode)": np.exp(Lc) * mask, "Persona-feature ensemble (no LLM)": np.exp(Lm) * mask,
+               "Blend: crowd + persona-feature": blend}
+    scored = {k: score(df, P) for k, P in systems.items()}
+    base = scored["Crowd prior (other people, mode)"]
+    retest, chance = df.retest_correct.mean(), float((1 / df.n_options).mean())
+    table = []
+    for k, s in scored.items():
+        d, (lo, hi) = paired_diff(s, base)
+        table.append([k, pct(s.correct.mean()), f"{100 * d:+.2f} ({100 * lo:+.2f} to {100 * hi:+.2f})", f"{s.logp.mean():.3f}"])
+    head = ["System", "Accuracy", "vs crowd prior, pts (95% CI)", "Log-lik. of real answer"]
+    text = (f"# No-LLM systems on {df.pid.nunique()} people / {len(df)} answers (people {offset}-{offset + n_people - 1} of the seeded order)\n\n"
+            f"Human test-retest accuracy {pct(retest)}, chance {pct(chance)}.\n\n{md_table(head, table)}\n\n"
+            f"Blend weights (crowd, persona-feature), mean over folds/groups: {np.round(w, 2).tolist()}\n")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    Path(f"{out}.md").write_text(text, encoding="utf-8")
+    print(text)
+    return {"n_people": df.pid.nunique(), "n_answers": len(df)}

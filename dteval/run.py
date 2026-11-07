@@ -11,28 +11,35 @@ from .models import Cache, Model, letter_probs
 
 def simulate(model: Model, out_dir: Path, n_people: int | None, persona_chars: int | None,
              shuffle_seed: int | None, pricing_k: int, matrix_rows: int | None,
-             seed: int = 0, offset: int = 0, cache_dir: Path = Path("cache")) -> Path:
+             seed: int = 0, offset: int = 0, label_style: str = "letters",
+             qids: set[str] | None = None, style: str = "v2",
+             cache_dir: Path = Path("cache")) -> Path:
+    labels = prompts.DIGITS if label_style == "digits" else prompts.LABELS
     out_dir.mkdir(parents=True, exist_ok=True)
     cache = Cache(cache_dir / f"{model.name.replace('/', '_')}.jsonl")
     people = data.select_people(data.load_people(), n_people, seed, offset)
     config = dict(model=model.name, n_people=len(people), persona_chars=persona_chars,
-                  shuffle_seed=shuffle_seed, pricing_k=pricing_k, matrix_rows=matrix_rows, seed=seed, offset=offset)
+                  shuffle_seed=shuffle_seed, pricing_k=pricing_k, matrix_rows=matrix_rows, seed=seed, offset=offset,
+                  label_style=label_style, qids=sorted(qids) if qids else None, style=style)
     (out_dir / "config.json").write_text(json.dumps(config, indent=2))
     path = out_dir / "predictions.jsonl"
     t0 = time.time()
     with path.open("w", encoding="utf-8") as f:
         for n, row in enumerate(people.itertuples(index=False), 1):
-            persona = data.render_persona(row.wave1_3_persona_json, persona_chars)
+            persona = (data.render_persona_first_person if style == "v2" else data.render_persona)(
+                row.wave1_3_persona_json, persona_chars)
             done_prefix: set[str] = set()
             for item in data.person_items(row, pricing_k, matrix_rows, seed):
-                prompt, order = prompts.build_prompt(persona, item, str(row.pid), shuffle_seed)
+                if qids and item.qid not in qids:
+                    continue
+                prompt, order = prompts.build_prompt(persona, item, str(row.pid), shuffle_seed, labels, style)
                 if hasattr(model, "prefill") and not cache.has(model, prompt):
-                    for pre in prompts.prefixes(prompt):  # checkpoint exactly where prompts diverge
+                    for pre in prompts.prefixes(prompt, style):  # checkpoint exactly where prompts diverge
                         if pre not in done_prefix:
                             model.prefill(pre)
                             done_prefix.add(pre)
                 shown, valid = letter_probs(cache.get_or_compute(model, prompt),
-                                            prompts.LABELS[: len(order)])
+                                            labels[: len(order)])
                 probs = [0.0] * len(order)
                 for k, i in enumerate(order):  # map displayed letter back to original option
                     probs[i] = shown[k]

@@ -21,6 +21,9 @@ def main() -> None:
     r.add_argument("--pricing-items", type=int, default=4, help="how many of the 40 pricing items")
     r.add_argument("--matrix-rows", type=int, default=4, help="max rows per matrix question; 0 = all")
     r.add_argument("--seed", type=int, default=0)
+    r.add_argument("--labels", choices=["letters", "digits"], default="letters", help="option label style")
+    r.add_argument("--style", choices=["v1", "v2"], default="v2", help="prompt style (v2 = first person, default)")
+    r.add_argument("--qids", help="comma-separated QIDs to restrict to (experiments)")
     r.add_argument("--offset", type=int, default=0, help="skip the first N people (disjoint test set)")
     r.add_argument("--out", type=Path, help="default runs/<name>")
 
@@ -34,6 +37,11 @@ def main() -> None:
     s.add_argument("--out", type=Path, help="default report/systems_<run name>")
     s.add_argument("--C", type=float, default=0.0006, help="regularisation of the persona-feature model")
 
+    n = sub.add_parser("systems-no-llm", help="crowd vs persona-feature models on many people (no LLM needed)")
+    n.add_argument("--n-people", type=int, default=200)
+    n.add_argument("--offset", type=int, default=0)
+    n.add_argument("--out", type=Path, default=Path("report/no_llm"))
+
     a = ap.parse_args()
     parser_default = "http://127.0.0.1:8080"
     if a.cmd == "download":
@@ -46,7 +54,11 @@ def main() -> None:
                  OpenAIChat(a.name, a.api_model or a.name, a.url if a.url != parser_default else
                             "https://api.openai.com/v1"))
         simulate(model, a.out or Path("runs") / a.name, a.n_people or None, a.persona_chars or None,
-                 a.shuffle_seed, a.pricing_items, a.matrix_rows or None, a.seed, a.offset)
+                 a.shuffle_seed, a.pricing_items, a.matrix_rows or None, a.seed, a.offset,
+                 a.labels, set(a.qids.split(",")) if a.qids else None, a.style)
+    elif a.cmd == "systems-no-llm":
+        from .stack import evaluate_no_llm
+        evaluate_no_llm(a.n_people, a.offset, a.out)
     elif a.cmd == "systems":
         from .stack import evaluate_run
         evaluate_run(a.run, a.out or Path("report") / f"systems_{a.run.name}", a.C)
