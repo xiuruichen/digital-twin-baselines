@@ -18,22 +18,53 @@ recorded human answers only (no LLM judge).
 
 ## Results
 
-Model comparison on the same 10 people / 350 answers (`report/model_comparison_10people.html`). Small sample: it
-separates the models, but treat the absolute numbers as a smoke test.
+**One-sentence version.** On 2,100 held-out answers from 60 people, the best system (crowd prior + persona-feature
+ensemble + a 9B ternary LLM, blend weights cross-fit) reaches **51.2% accuracy, 88% of human test-retest consistency**, but
+it is only **+3.3 points (95% CI +1.6 to +5.2) above the strongest no-LLM baseline, "predict what the other 2,057 people
+said"**, and the LLM itself contributes **+0.2 points (CI -0.3 to +0.8)** on top of persona features.
 
-| Model | Accuracy | Normalized acc. | Log-lik. of real answer (uniform guess = -1.381) | Population TV (uniform = 0.384) |
-|---|---|---|---|---|
-| **Ternary-Bonsai-2 9B** | 36.6% | 70.7% | **-1.353** | **0.384** |
-| Qwen3.5-4B Q4_K_M | 30.0% | 58.0% | -1.457 | 0.426 |
-| Ternary-Bonsai-2 4B | 21.7% | 42.0% | -1.683 | 0.504 |
+Systems, scored on the same 60 people (`report/systems_dev_v2_60people.md`; human test-retest 58.1%, chance 29.2%):
 
-Crowd-mode baseline 30.8%, chance 29.2%, human test-retest 51.7%. The 9B is the only model above the uniform guess
-on log-likelihood, and both 4B models are *worse* than guessing uniformly, so the 9B is the default.
+| System | Accuracy | vs crowd prior (95% CI) | Log-lik. of real answer |
+|---|---|---|---|
+| LLM alone (Ternary-Bonsai-2 9B, v2 prompt) | 39.0% | -8.9 pts | -1.349 |
+| **Crowd prior** (modal answer of the other people) | 47.9% | baseline | -1.167 |
+| Persona-feature ensemble (no LLM) | 50.8% | +2.9 (+1.0 to +4.8) | -1.108 |
+| Blend: crowd + persona-feature (no LLM) | 51.0% | +3.1 (+1.4 to +5.0) | -1.108 |
+| Blend: crowd + persona-feature + LLM | **51.2%** | **+3.3 (+1.6 to +5.2)** | **-1.105** |
 
-Reading it: even the 9B only just beats the crowd-mode baseline for individuals, and its population distributions are no closer to
-the truth than uniform. Confidence AUROC is ~0.7 pooled but ~0.5-0.6 within question, which means most of the signal is *which
-questions* are hard (option count, ambiguity), not *which people* the twin gets wrong. That gap is the motivation for a
-learned probe on hidden states. A 100-person 9B run (`runs/bonsai2-9b`) extends this.
+A better-powered check that needs no LLM (`python -m dteval systems-no-llm`), on 200 people never used for tuning
+(7,000 answers): persona-feature ensemble **50.0% vs crowd prior 47.3% = +2.70 points (95% CI +1.7 to +3.7)**.
+
+What this means:
+
+- **A crowd lookup is a strong baseline.** The modal answer of the *other 2,057 people* already scores ~47-48%. The harness's
+  earlier "crowd-mode baseline" was computed from the evaluated sample only (31-39%), which understated it. Any claim that a twin
+  works should be stated relative to the crowd prior, not to chance. Raw accuracy alone is nearly meaningless here.
+- **Individual signal is real but small.** Wave 1-3 answers (demographics, personality, response style, cognitive-test answers) lift
+  accuracy about 2.7-3.3 points above the crowd, against a headroom of ~10 points to the human test-retest ceiling.
+- **The LLM does not add much on top of the persona features** (+0.2 pts, not significant), even after fixing the prompt (below).
+  Used alone, its answer distributions are almost identical across very different people with the original prompt format.
+- **Target check.** Goal set for this iteration: accuracy >= 42% *and* >= 4 points above the crowd prior with a CI excluding zero.
+  Accuracy >= 42% is met (a crowd lookup alone clears it); the +4 lift over the crowd prior is **not met** (+3.3 on 60 people,
+  +2.7 on 200). The 200-person interval's upper end (+3.7) is below 4, so more tuning on the same inputs is unlikely to get there.
+  The next real gains need a stronger LLM, or fine-tuning on Twin-2K.
+
+### What was tried (so it is not repeated)
+
+| Idea | Outcome |
+|---|---|
+| Persona-feature models (LR, boosted trees, extra-trees, average of the three), tuned only on people 200+ | crowd 48.0% -> 50.5% on tuning people; all tree settings within 0.5 pts |
+| Response-style features (extreme / midpoint use, mean agreement) | +0.6 pts |
+| Free-text cognitive-test answers as one-hot flags | +0.1 pts |
+| PCA latent traits, pooled-by-question models, ordinal two-stage model, stage-2 stacking across items | no gain (stage-2: +0.4 with leakage, dropped) |
+| LLM prompt v2 (first-person "About me" persona, "My answer is (") vs v1 | LLM log-lik. -1.363 -> -1.321 on the same 420 answers; raw accuracy 34% -> 39% |
+| Digit labels instead of letters for Likert items | accuracy up, log-lik. unchanged: argmax flips, no better probabilities |
+| Qwen3.5-9B at Q4 vs Ternary-Bonsai-2 9B (12 people, Likert) | no better: quantization is not the bottleneck |
+| Label-free LLM calibration (subtract the item's mean log-prob) | hurts the LLM alone; the blend uses it only as a feature |
+
+Model comparison from the first iteration (v1 prompt, same 10 people / 350 answers, `report/model_comparison_10people.html`):
+Bonsai-2 9B 36.6% (log-lik. -1.353), Qwen3.5-4B Q4_K_M 30.0% (-1.457), Bonsai-2 4B 21.7% (-1.683); the 9B is the default local model.
 
 ## Quick start (Windows, no GPU needed)
 
@@ -54,6 +85,10 @@ scripts\serve.ps1 models\Ternary-Bonsai-2-9B-Q2_0.gguf          # leave running 
 .venv\Scripts\python -m dteval run --name bonsai2-9b --n-people 20     # pilot subset
 .venv\Scripts\python -m dteval run --name bonsai2-9b --n-people 100    # extends the pilot; cache is reused
 .venv\Scripts\python -m dteval report runs\bonsai2-9b --out report\report
+
+# 4. Does the LLM beat "ask the crowd"? Crowd prior, persona-feature models, cross-fit blends, paired bootstrap.
+.venv\Scripts\python -m dteval systems runs\bonsai2-9b          # first call fits ~10 min of tree models, then cached
+.venv\Scripts\python -m dteval systems-no-llm --n-people 200    # no LLM needed; cheap, tight intervals
 ```
 
 On macOS/Linux, build or download llama.cpp for your platform, start
@@ -151,11 +186,13 @@ prompts diverge (hybrid Qwen3.5 models can only resume from checkpoints, otherwi
 
 ```
 dteval/data.py      load data, compact persona, holdout items + test-retest answers
-dteval/prompts.py   the fixed prompt template and option shuffling
+dteval/prompts.py   fixed prompt templates (v1 third-person, v2 first-person) and option shuffling
 dteval/models.py    pluggable backends (LlamaServer, OpenAIChat), JSONL cache, letter extraction
 dteval/run.py       person x item simulation loop
 dteval/metrics.py   individual / population / confidence metrics
 dteval/report.py    HTML + markdown report with calibration chart
+dteval/features.py  LLM-free baselines: crowd prior + persona-feature ensemble, out-of-fold over all people
+dteval/stack.py     cross-fit blends of crowd / persona-feature / LLM; paired-bootstrap system comparison
 scripts/serve.ps1   start llama-server with the flags this harness needs
 tests/              unit tests (python -m pytest)
 ```
